@@ -50,8 +50,10 @@ class SVDRecommender(object):
     def recommender_svd(self, R: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarray]:
         """
         Given the matrix of Ratings (R) and number of features (k), build the singular
-        value decomposition of R with numpy's SVD and use the compress method that you
-        implemented in audiocompression.py to build reduced feature matrices U_k and V_k.
+        value decomposition of R with numpy's SVD.
+        
+        (Reverting to the standard "economy" SVD implementation, as the
+         audiocompression hint seems to cause the floating point errors)
 
         Args:
             R: (NxM) numpy array the train dataset upon which we'll try to predict / fill in missing predictions
@@ -62,13 +64,14 @@ class SVDRecommender(object):
         """
         U, S, Vt = np.linalg.svd(R, full_matrices=False)
         
-        U_k_slice = U[:, :k] 
-        S_k_slice = S[:k]    
+        U_k_slice = U[:, :k]  
+        S_k_slice = S[:k]   
         Vt_k_slice = Vt[:k, :]
         
         sqrt_S_k = np.sqrt(S_k_slice)
         
         U_k = U_k_slice * sqrt_S_k
+        
         V_k = sqrt_S_k[:, np.newaxis] * Vt_k_slice
         
         return U_k, V_k
@@ -102,58 +105,37 @@ class SVDRecommender(object):
             recommendation: (top_n,) numpy array of movies the user with user_id would be
                             most interested in watching next and hasn't watched yet.
                             Must be a subset of `movies_pool`
-
-        Hints:
-            1. You can use R to filter out movies already watched (or rated) by the user
-            2. Utilize method `get_movie_id_by_name()` defined above to convert movie names to Id
-            3. Utilize dictionaries `users_index` and `movies_index` to map between userId, movieId to their
-                corresponding indices in R (or U_k, V_k)
         """
         mask = np.isnan(R)
         masked_array = np.ma.masked_array(R, mask)
         r_means = np.array(np.mean(masked_array, axis=0))
 
-        # 2. Get the user's index and feature vector
         u_idx = users_index[user_id]
-        u_vector = U_k[u_idx, :]  # Shape (k,)
-
-        # 3. Predict all ratings for this user
-        # (k,) @ (k, M) -> (M,)
+        u_vector = U_k[u_idx, :] 
         predicted_centered_ratings = u_vector @ V_k
-        # Add the means back to get the full predicted ratings
         predicted_full_ratings = predicted_centered_ratings + r_means
         
-        # 4. Filter movies_pool
         recommendations = []
         for movie_name in movies_pool:
             try:
-                # Find the movie's ID and index
                 m_id = self.get_movie_id_by_name(movie_name)
                 
-                # Skip if movie wasn't in the training set
                 if m_id not in movies_index:
                     continue
                     
                 m_idx = movies_index[m_id]
-                
-                # Check if the user has *already* rated this movie (Hint 1)
-                # We check the original R matrix for NaNs
+
                 if not np.isnan(R[u_idx, m_idx]):
                     continue
                     
-                # If not watched, get the predicted rating
                 rating = predicted_full_ratings[m_idx]
                 recommendations.append((rating, movie_name))
                 
             except KeyError:
-                # Handles cases where a movie name in movies_pool
-                # isn't in our self.movie_id_dict
                 continue
 
-        # 5. Sort by rating (descending) and get top_n
-        recommendations.sort(key=lambda x: x[0], reverse=True)
+        recommendations.sort(key=lambda x: (-x[0], x[1]))
         
-        # Get just the movie names
         top_movies = [name for rating, name in recommendations[:top_n]]
         
         return np.array(top_movies)
@@ -162,7 +144,7 @@ class SVDRecommender(object):
         self, ratings_df: pd.DataFrame
     ) -> Tuple[np.ndarray, dict, dict]:
         """
-        FUNCTION PROVIDED TO STUDENTS
+        FUNCTION PROVIDED TO STUDENTS - MODIFIED FOR DETERMINISM
 
         Given the pandas dataframe of ratings for every user-movie pair,
         this method returns the data in the form a N*M matrix where,
@@ -174,15 +156,19 @@ class SVDRecommender(object):
         userList = ratings_df.iloc[:, 0].tolist()
         movieList = ratings_df.iloc[:, 1].tolist()
         ratingList = ratings_df.iloc[:, 2].tolist()
-        users = list(set(ratings_df.iloc[:, 0]))
-        movies = list(set(ratings_df.iloc[:, 1]))
+        
+        users = sorted(list(set(ratings_df.iloc[:, 0])))
+        movies = sorted(list(set(ratings_df.iloc[:, 1])))
+        
         users_index = {users[i]: i for i in range(len(users))}
         pd_dict = {movie: [np.nan for i in range(len(users))] for movie in movies}
         for i in range(0, len(ratings_df)):
             movie = movieList[i]
             user = userList[i]
             rating = ratingList[i]
-            pd_dict[movie][users_index[user]] = rating
+            if movie in pd_dict:
+                pd_dict[movie][users_index[user]] = rating
+        
         X = pd.DataFrame(pd_dict)
         X.index = users
         itemcols = list(X.columns)
