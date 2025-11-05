@@ -81,10 +81,12 @@ class LogisticRegression(object):
             loss (float)
         """
         N = y.shape[0]
-        epsilon = 1e-9
+        epsilon = 1e-15
         
-        term1 = y * np.log(h_x + epsilon)
-        term2 = (1 - y) * np.log(1 - h_x + epsilon)
+        h_x_clipped = np.clip(h_x, epsilon, 1 - epsilon)
+        
+        term1 = y * np.log(h_x_clipped)
+        term2 = (1 - y) * np.log(1 - h_x_clipped)
         
         loss = - (1/N) * np.sum(term1 + term2)
         return float(loss)
@@ -338,13 +340,16 @@ def hyperparameter_tuning(
         model is the LogisticRegression you implemented. Use evaluate() from that class.
     """
     best_accuracy = -1.0
-    best_threshold = thresholds[0]
+    best_threshold = np.inf
     
     for t in thresholds:
         _, acc = model.evaluate(x_test, y_test, theta, t)
-    
+        
         if acc > best_accuracy:
             best_accuracy = acc
             best_threshold = t
+        elif acc == best_accuracy:
+            if t < best_threshold:
+                best_threshold = t
             
     return (best_threshold, best_accuracy)
